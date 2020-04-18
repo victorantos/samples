@@ -12,15 +12,41 @@ let localConnection;
 let remoteConnection;
 let sendChannel;
 let receiveChannel;
+let isRemote = true;
+let msg = null;
+
+const urlParams = new URLSearchParams(window.location.search);
+isRemote = urlParams.get('remote') == 'true'; 
+console.log(isRemote ? 'this is remote peer' : 'this is local peer');
+ 
+
 const dataChannelSend = document.querySelector('textarea#dataChannelSend');
 const dataChannelReceive = document.querySelector('textarea#dataChannelReceive');
 const startButton = document.querySelector('button#startButton');
 const sendButton = document.querySelector('button#sendButton');
 const closeButton = document.querySelector('button#closeButton');
+const handleOffer = document.querySelector('button#handleOfferButton');
+const handleAnswer = document.querySelector('button#handleAnswerButton');
+const handleCandidate = document.querySelector('button#handleCandidateButton');
+
+if(isRemote)
+{
+  handleAnswer.style.display = 'none';
+}
+else{
+  handleOffer.style.display = 'none';
+}
+
+window.addEventListener("ondatachannel", (ev) => {
+  console.log("You knocked a datachannel?" + ev.channel );
+});
 
 startButton.onclick = createConnection;
 sendButton.onclick = sendData;
 closeButton.onclick = closeDataChannels;
+handleOffer.onclick = handleOfferClick;
+handleAnswer.onclick = handleAnswerClick;
+handleCandidate.onclick = handleCandidateClick;
 
 function enableStartButton() {
   startButton.disabled = false;
@@ -30,33 +56,84 @@ function disableSendButton() {
   sendButton.disabled = true;
 }
 
+function handleOfferClick()
+{
+  if(isRemote)
+  {
+    gotDescription1(msg);
+     
+  }
+  else{
+   // do nothing
+  }
+}
+
+function handleAnswerClick()
+{
+  if(isRemote)
+  {
+     // do nothing for local
+  }
+  else{
+     
+      localConnection.setRemoteDescription(msg);
+  }
+}
+
+function handleCandidateClick()
+{
+  if(isRemote)
+  {
+    remoteConnection.addIceCandidate(msg);
+  }
+  else{
+    localConnection.addIceCandidate(msg);
+  }
+}
+
 function createConnection() {
   dataChannelSend.placeholder = '';
   const servers = null;
-  window.localConnection = localConnection = new RTCPeerConnection(servers);
-  console.log('Created local peer connection object localConnection');
 
-  sendChannel = localConnection.createDataChannel('sendDataChannel');
-  console.log('Created send data channel');
+  if(!isRemote)
+  {
+    window.localConnection = localConnection = new RTCPeerConnection(servers);
+    console.log('Created local peer connection object localConnection');
 
-  localConnection.onicecandidate = e => {
-    onIceCandidate(localConnection, e);
-  };
-  sendChannel.onopen = onSendChannelStateChange;
-  sendChannel.onclose = onSendChannelStateChange;
+    sendChannel = localConnection.createDataChannel(name='sendDataChannel', {
+       id:1, negotiated: true
+    });
+    console.log('Created send data channel, id='+sendChannel.id);
 
-  window.remoteConnection = remoteConnection = new RTCPeerConnection(servers);
-  console.log('Created remote peer connection object remoteConnection');
+    localConnection.onicecandidate = e => {
+      onIceCandidate(localConnection, e);
+    };
+    sendChannel.onopen = onSendChannelStateChange;
+    sendChannel.onclose = onSendChannelStateChange;
+  }
+  else{
+    window.remoteConnection = remoteConnection = new RTCPeerConnection(servers);
+    console.log('Created remote peer connection object remoteConnection');
+  
+    remoteConnection.onicecandidate = e => {
+      onIceCandidate(remoteConnection, e);
+    };
+    //remoteConnection.ondatachannel = receiveChannelCallback;
 
-  remoteConnection.onicecandidate = e => {
-    onIceCandidate(remoteConnection, e);
-  };
-  remoteConnection.ondatachannel = receiveChannelCallback;
+    receiveChannel = remoteConnection.createDataChannel("sendDataChannel", {id:1, negotiated: true});
+    receiveChannel.onmessage = onReceiveMessageCallback;
+    receiveChannel.onopen = onReceiveChannelStateChange;
+    receiveChannel.onclose = onReceiveChannelStateChange;
+    receiveChannel.onerror = onReceiveChannelError;
+  }
 
-  localConnection.createOffer().then(
-      gotDescription1,
-      onCreateSessionDescriptionError
-  );
+  if(!isRemote)
+  {
+    localConnection.createOffer().then(
+        gotDescription1,
+        onCreateSessionDescriptionError
+    );
+  }
   startButton.disabled = true;
   closeButton.disabled = false;
 }
@@ -93,19 +170,26 @@ function closeDataChannels() {
 }
 
 function gotDescription1(desc) {
-  localConnection.setLocalDescription(desc);
-  console.log(`Offer from localConnection\n${desc.sdp}`);
-  remoteConnection.setRemoteDescription(desc);
-  remoteConnection.createAnswer().then(
-      gotDescription2,
-      onCreateSessionDescriptionError
-  );
+  if(!isRemote)
+  {
+    localConnection.setLocalDescription(desc);
+    console.log("Offer from localConnection\n");
+    console.log(JSON.stringify(desc));
+  }
+  else{
+    remoteConnection.setRemoteDescription(desc);
+    remoteConnection.createAnswer().then(
+        gotDescription2,
+        onCreateSessionDescriptionError
+    );
+  }
 }
 
 function gotDescription2(desc) {
   remoteConnection.setLocalDescription(desc);
   console.log(`Answer from remoteConnection\n${desc.sdp}`);
-  localConnection.setRemoteDescription(desc);
+  console.log(JSON.stringify(desc));
+  //localConnection.setRemoteDescription(desc);
 }
 
 function getOtherPc(pc) {
@@ -117,13 +201,14 @@ function getName(pc) {
 }
 
 function onIceCandidate(pc, event) {
-  getOtherPc(pc)
-      .addIceCandidate(event.candidate)
-      .then(
-          () => onAddIceCandidateSuccess(pc),
-          err => onAddIceCandidateError(pc, err)
-      );
+  // getOtherPc(pc)
+  //     .addIceCandidate(event.candidate)
+  //     .then(
+  //         () => onAddIceCandidateSuccess(pc),
+  //         err => onAddIceCandidateError(pc, err)
+  //     );
   console.log(`${getName(pc)} ICE candidate: ${event.candidate ? event.candidate.candidate : '(null)'}`);
+  console.log(JSON.stringify(event.candidate));
 }
 
 function onAddIceCandidateSuccess() {
@@ -142,6 +227,9 @@ function receiveChannelCallback(event) {
   receiveChannel.onclose = onReceiveChannelStateChange;
 }
 
+function onReceiveChannelError(e){
+  console.log("ERROR, onReceiveChannelError:" + e);
+}
 function onReceiveMessageCallback(event) {
   console.log('Received Message');
   dataChannelReceive.value = event.data;
